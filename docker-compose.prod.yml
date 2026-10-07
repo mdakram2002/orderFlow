@@ -1,0 +1,37 @@
+services:
+  gateway:
+    image: ghcr.io/${GHCR_OWNER}/orderflow-gateway:latest
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-https://orderflow.example.com}
+      NODE_ENV: production
+  user-service:
+    image: ghcr.io/${GHCR_OWNER}/orderflow-user-service:latest
+    pull_policy: always
+    restart: unless-stopped
+  product-service:
+    image: ghcr.io/${GHCR_OWNER}/orderflow-product-service:latest
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      SEED_DEMO_DATA: "false"
+  order-service:
+    image: ghcr.io/${GHCR_OWNER}/orderflow-order-service:latest
+    pull_policy: always
+    restart: unless-stopped
+  payment-service:
+    image: ghcr.io/${GHCR_OWNER}/orderflow-payment-service:latest
+    pull_policy: always
+    restart: unless-stopped
+  notification-service:
+    image: ghcr.io/${GHCR_OWNER}/orderflow-notification-service:latest
+    pull_policy: always
+    restart: unless-stopped
+  frontend:
+    image: ghcr.io/${GHCR_OWNER}/orderflow-frontend:latest
+    pull_policy: always
+    environment:
+      API_GATEWAY_URL: http://gateway:3000
+      NODE_ENV: production
+    restart: unless-stopped

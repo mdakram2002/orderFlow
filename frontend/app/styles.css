@@ -1,0 +1,60 @@
+:root { color-scheme: light; --ink: #18261f; --muted: #69776e; --line: #dfe7e1; --green: #126b4b; --lime: #d6f36b; --paper: #f5f7f3; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: "Segoe UI", Arial, sans-serif; }
+button, input { font: inherit; }
+button { border: 0; border-radius: 9px; background: var(--green); color: white; padding: 11px 16px; font-weight: 700; cursor: pointer; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.shell { max-width: 1160px; padding: 34px 28px 24px; margin: 0 auto; }
+header, .section-heading, .checkout, .product-bottom { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+header h1, h2, h3, p { margin-top: 0; }
+h1, h2 { font-family: "Trebuchet MS", "Segoe UI", sans-serif; letter-spacing: -.04em; }
+h1 { margin-bottom: 0; font-size: 34px; }
+h2 { margin-bottom: 10px; font-size: 31px; }
+.eyebrow { color: var(--green); font-size: 11px; font-weight: 700; letter-spacing: .14em; margin-bottom: 9px; }
+.badge { padding: 9px 13px; border: 1px solid var(--line); border-radius: 30px; color: var(--muted); font-size: 12px; }
+.intro { display: grid; grid-template-columns: 1.3fr .7fr; gap: 36px; align-items: center; background: #eaf0e8; border-radius: 18px; padding: 36px; margin: 30px 0 18px; }
+.intro h2 { font-size: clamp(34px, 5vw, 54px); margin-bottom: 12px; }
+.intro p:not(.eyebrow) { color: var(--muted); max-width: 540px; line-height: 1.65; }
+.login { display: grid; gap: 10px; background: white; padding: 20px; border: 1px solid var(--line); border-radius: 14px; }
+.auth-actions { display: flex; gap: 8px; }
+.auth-actions button { flex: 1; padding: 10px 8px; font-size: 13px; }
+.login h3 { margin-bottom: 2px; }
+input { border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px; min-width: 0; }
+.notice { background: #fff6da; border: 1px solid #ecd98a; border-radius: 8px; padding: 12px 15px; }
+.catalog { padding: 30px 0; }
+.section-heading { margin-bottom: 16px; }
+.catalog-tools { display: flex; align-items: center; gap: 12px; }
+.catalog-tools input { width: 220px; background: white; }
+.section-heading h2, .checkout h2 { margin: 0; }
+.section-heading > span, .checkout p:not(.eyebrow) { color: var(--muted); }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.product { border: 1px solid var(--line); background: white; border-radius: 14px; padding: 20px; }
+.product-mark { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 16px; background: var(--lime); color: var(--green); border-radius: 12px; font: 700 19px "Trebuchet MS", sans-serif; }
+.product h3 { margin-bottom: 6px; }
+.product > p:not(.eyebrow) { color: var(--muted); min-height: 42px; font-size: 14px; }
+.product-bottom { border-top: 1px solid var(--line); padding-top: 15px; }
+.product-bottom strong { font-size: 14px; }
+.product-bottom button { padding: 9px 12px; font-size: 12px; }
+.empty { color: var(--muted); padding: 30px; text-align: center; background: white; border: 1px dashed var(--line); border-radius: 12px; }
+.checkout { margin-top: 6px; padding: 22px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.checkout p:not(.eyebrow) { margin: 7px 0 0; }
+.actions { display: flex; gap: 10px; }
+.secondary { background: transparent; color: var(--green); border: 1px solid var(--line); }
+.orders-list { display: grid; gap: 14px; }
+.order-card { background: white; border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+.order-card-header, .order-summary, .order-item { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.order-card-header { padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.order-card-header .eyebrow { margin-bottom: 4px; }
+.order-card-header h3 { margin: 0; font-size: 16px; }
+.order-status { border-radius: 20px; background: #eaf0e8; color: var(--green); padding: 7px 11px; font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+.order-status-cancelled { background: #fff0ed; color: #a13d2d; }
+.order-status-pending, .order-status-processing { background: #fff6da; color: #765a00; }
+.order-summary { padding: 14px 0; color: var(--muted); font-size: 14px; }
+.order-summary strong { color: var(--ink); font-size: 16px; }
+.order-items { list-style: none; padding: 0; margin: 0; }
+.order-item { padding: 12px 0; border-top: 1px solid var(--line); }
+.order-item-name { display: grid; gap: 4px; }
+.order-item-name small { color: var(--muted); font-size: 12px; }
+.order-item-price { color: var(--muted); font-size: 14px; }
+footer { padding: 24px 0 4px; text-align: center; color: var(--muted); font-size: 12px; }
+@media (max-width: 760px) { .intro { grid-template-columns: 1fr; padding: 24px; } .grid { grid-template-columns: 1fr; } header { align-items: flex-start; } .checkout { align-items: flex-start; flex-direction: column; } .section-heading, .catalog-tools { align-items: flex-start; flex-direction: column; } .catalog-tools input { width: 100%; } .order-card { padding: 16px; } }

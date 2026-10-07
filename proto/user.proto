@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package orderflow.user.v1;
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (UserResponse);
+  rpc ValidateUser(ValidateUserRequest) returns (ValidateUserResponse);
+}
+
+message GetUserRequest { string user_id = 1; }
+message ValidateUserRequest { string user_id = 1; }
+message UserResponse {
+  string user_id = 1;
+  string email = 2;
+  string role = 3;
+  bool active = 4;
+}
+message ValidateUserResponse {
+  bool valid = 1;
+  string role = 2;
+}
+

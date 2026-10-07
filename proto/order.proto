@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package orderflow.order.v1;
+
+service OrderService {
+  rpc GetOrder(GetOrderRequest) returns (OrderResponse);
+}
+
+message GetOrderRequest {
+  string order_id = 1;
+  string user_id = 2;
+}
+message OrderResponse {
+  string order_id = 1;
+  string status = 2;
+  int64 total_minor = 3;
+}
+

@@ -1,0 +1,89 @@
+{
+  "info": {
+    "name": "OrderFlow Public API",
+    "description": "Public REST contracts through the API Gateway. Register/login first, create an admin account using ADMIN_EMAILS for admin-only requests, and set productId after catalog setup.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:30000/api" },
+    { "key": "token", "value": "" },
+    { "key": "productId", "value": "" },
+    { "key": "orderId", "value": "" },
+    { "key": "email", "value": "customer@example.com" },
+    { "key": "password", "value": "ChangeMe-For-Local-Only-2026" }
+  ],
+  "item": [
+    {
+      "name": "Register",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"email\":\"{{email}}\",\"password\":\"{{password}}\"}" },
+        "url": "{{baseUrl}}/auth/register"
+      }
+    },
+    {
+      "name": "Login",
+      "event": [{ "listen": "test", "script": { "exec": ["if (pm.response.code === 200) pm.collectionVariables.set('token', pm.response.json().access_token);"] } }],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"email\":\"{{email}}\",\"password\":\"{{password}}\"}" },
+        "url": "{{baseUrl}}/auth/login"
+      }
+    },
+    { "name": "List products", "request": { "method": "GET", "url": "{{baseUrl}}/products" } },
+    { "name": "Search products", "request": { "method": "GET", "url": "{{baseUrl}}/products/search?q=notebook" } },
+    {
+      "name": "Get product",
+      "request": { "method": "GET", "url": "{{baseUrl}}/products/{{productId}}" }
+    },
+    {
+      "name": "Replace cart",
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"items\":[{\"productId\":\"{{productId}}\",\"quantity\":1}]}" },
+        "url": "{{baseUrl}}/cart"
+      }
+    },
+    {
+      "name": "Get cart",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/cart" }
+    },
+    {
+      "name": "Add cart item",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"productId\":\"{{productId}}\",\"quantity\":1}" },
+        "url": "{{baseUrl}}/cart/items"
+      }
+    },
+    {
+      "name": "Create order",
+      "event": [{ "listen": "test", "script": { "exec": ["if (pm.response.code === 201) pm.collectionVariables.set('orderId', pm.response.json().id);"] } }],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"items\":[{\"productId\":\"{{productId}}\",\"quantity\":1}]}" },
+        "url": "{{baseUrl}}/orders"
+      }
+    },
+    { "name": "Order history", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/orders" } },
+    { "name": "Get order", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/orders/{{orderId}}" } },
+    {
+      "name": "Cancel order",
+      "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/orders/{{orderId}}/cancel" }
+    },
+    {
+      "name": "Admin create product",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }, { "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\"name\":\"Demo item\",\"description\":\"Created from Postman\",\"category\":\"Demo\",\"priceMinor\":1000,\"currency\":\"INR\",\"stock\":10}" },
+        "url": "{{baseUrl}}/products"
+      }
+    }
+  ]
+}

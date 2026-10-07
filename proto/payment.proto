@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package orderflow.payment.v1;
+
+service PaymentService {
+  rpc ProcessPayment(ProcessPaymentRequest) returns (PaymentResponse);
+}
+
+message ProcessPaymentRequest {
+  string order_id = 1;
+  string user_id = 2;
+  int64 amount_minor = 3;
+  string currency = 4;
+  string idempotency_key = 5;
+  string request_id = 6;
+}
+message PaymentResponse {
+  string payment_id = 1;
+  string status = 2;
+  string error_code = 3;
+}
+
