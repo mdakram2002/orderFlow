@@ -1,114 +1,114 @@
 # OrderFlow
 
-OrderFlow is a e-commerce platform demonstrating independently runnable services, synchronous gRPC contracts, Redis-backed asynchronous events, and a compensating order saga.
+OrderFlow is a sample e-commerce application built as a set of independently runnable services. It demonstrates REST and gRPC APIs, a Redis-backed cart and cache, an order saga, and asynchronous order notifications.
 
 ## Architecture
 
 ```text
-React/Next.js ──REST──> API Gateway (JWT, RBAC, rate limits)
-                             │
-                  REST / gRPC, bounded deadlines
-         ┌──────────────┬────┴─────────┬──────────────┐
-         ▼              ▼              ▼              ▼
-    User Service   Product Service  Order Service  Payment Service
-      PostgreSQL    MongoDB/Redis   PostgreSQL/Redis PostgreSQL
-                                         │
-                                   Redis Stream
-                                         ▼
-                      Redis Stream → BullMQ Queue
-                                         ▼
-                                Notification Service
+Browser -> Next.js frontend -> API Gateway -> User, Product, Order, Payment services
+                                                   |
+                                          PostgreSQL / MongoDB
+                                                   |
+                                   Order outbox -> Redis Stream
+                                                   |
+                                          BullMQ notification queue
+                                                   |
+                                      Notification worker (mock output)
 ```
 
-The services own their data. Local Compose uses a single Postgres server with separate `user_db`, `order_db`, and `payment_db` databases. Product Service owns MongoDB; Redis stores cache entries and transient events.
+Order status events are committed to the order service's database outbox. The outbox publisher sends them to the `order-events` Redis Stream. The notification service enqueues them into BullMQ's `order-notifications` queue and acknowledges the stream event after the queue accepts it. BullMQ retries failed jobs with exponential backoff. The current notification handler logs a mock email; it does not send email or push browser notifications.
 
-## Services and stack
+## Services
 
 | Service | Runtime | Responsibility |
 | --- | --- | --- |
-| `gateway` | Node.js, TypeScript, Express | Public REST API, JWT/RBAC, request IDs, rate limiting |
-| `user-service` | Python, FastAPI, PostgreSQL | Registration, authentication, user lookup |
-| `product-service` | Node.js, TypeScript, Express, MongoDB, Redis | Catalog, search, caching, inventory |
-| `order-service` | Python, FastAPI, PostgreSQL, Redis | Cart and order orchestration/saga |
-| `payment-service` | Node.js, TypeScript, Express, PostgreSQL | Idempotent mock payment processing |
-| `notification-service` | Node.js, BullMQ, Redis | Redis Stream bridge, queued notification worker, and mock email output |
-| `frontend` | Next.js | Minimal user-facing journey |
+| `frontend` | Next.js, React | Customer storefront |
+| `gateway` | Node.js, TypeScript, Express | Public REST API, JWT validation, authorization, rate limits |
+| `user-service` | Python, FastAPI, PostgreSQL | Registration, authentication, user data |
+| `product-service` | Node.js, TypeScript, MongoDB, Redis | Catalog and inventory |
+| `order-service` | Python, FastAPI, PostgreSQL, Redis | Cart, order saga, durable event outbox |
+| `payment-service` | Node.js, TypeScript, PostgreSQL | Idempotent mock payments |
+| `notification-service` | Node.js, BullMQ, Redis | Stream bridge and asynchronous notification worker |
 
-REST is for external clients, gRPC is for synchronous internal calls, and Redis Streams plus BullMQ handle asynchronous order notifications.
+## Start the application
 
-## Local setup
+Requirements: Docker Desktop running with Linux containers and Docker Compose v2.
 
-Requirements: Docker Desktop with Compose v2. Copy `.env.example` to `.env`; replace `JWT_SECRET` with a random secret before exposing the application.
+1. Create the local environment file:
 
-```powershell
-Copy-Item .env.example .env
-docker compose up --build
-```
+   ```powershell
+   Copy-Item .env.example .env
+   ```
 
-Gateway: `http://localhost:30000`; frontend: `http://localhost:30001` (both host ports are configurable in `.env`). The frontend proxies `/api` through its Next.js server to the gateway, avoiding browser CORS issues; set the `API_GATEWAY_URL` Docker build argument to the gateway URL when building for another environment. For local database tooling, Postgres/MongoDB/Redis are bound to `127.0.0.1:15432`, `127.0.0.1:27018`, and `127.0.0.1:16379`; service-to-service traffic uses Docker's private network. Health endpoints are available at `/health` on each service. Stop the stack with `docker compose down`; add `-v` only when intentionally deleting local database data.
+2. Set `JWT_SECRET` in `.env` to a random value of at least 32 characters. The example credentials are for local development only.
+3. From the repository root, build and start all services:
 
-## Configuration
+   ```powershell
+   docker compose up --build
+   ```
 
-See [.env.example](./.env.example). It includes JWT configuration, individual service database URLs, service ports/targets, Redis and MongoDB connections, payment test behavior, and gRPC timeout settings. The gateway proxy deadline defaults to 15 seconds so retrying gRPC sagas can complete before the client gives up. The gateway CORS allowlist accepts localhost ports 3000 and 3001 in development; configure `FRONTEND_ORIGINS` with the deployed frontend origin(s) for production. Do not commit `.env` or production credentials.
+   To run in the background, add `-d`:
 
-## Distributed systems
+   ```powershell
+   docker compose up --build -d
+   ```
 
-- **Saga:** reserve stock, persist the pending order, and charge through Payment Service. A failed payment releases stock and cancels the order; no cross-service database transaction is attempted.
-- **Idempotency:** payment requests carry an idempotency key backed by a unique database constraint so retried requests return the original result.
-- **Timeout/retry/circuit breaker:** internal RPCs use deadlines. Retry only transient/idempotent operations with exponential backoff; fail fast while a downstream circuit is open.
-- **Cache-aside:** Product Service checks `product:{id}` in Redis before MongoDB; cache values expire and writes invalidate relevant entries.
-- **Events:** order state changes are written to the `order-events` Redis Stream. The notification service adds each event to the `order-notifications` BullMQ queue, acknowledges the stream entry after enqueue succeeds, and retries failed jobs with exponential backoff. Configure a unique `CONSUMER_NAME` per notification-service replica.
-- **Observability:** gateway-generated request IDs flow through downstream calls and structured logs.
+Open the storefront at <http://localhost:30001> and the API gateway at <http://localhost:30000>. Check container health with `docker compose ps`, view logs with `docker compose logs -f`, and stop the stack with `docker compose down`.
+
+Local database ports are bound to loopback: PostgreSQL `15432`, MongoDB `27018`, and Redis `16379`. The services communicate over the Compose network. Compose reads `.env` for variable substitution and passes only each service's explicitly declared environment variables into its container.
+
+## Configuration and security
+
+Start from `.env.example`. Keep `.env` out of source control; it is ignored by Git. Do not use the example passwords or JWT secret outside local development. The production Compose overlay requires `GHCR_OWNER`, `POSTGRES_PASSWORD`, `JWT_SECRET`, `USER_DATABASE_URL`, `ORDER_DATABASE_URL`, `PAYMENT_DATABASE_URL`, `MONGODB_URI`, and `REDIS_URL`. Use protected deployment secrets and a TLS-enabled `rediss://` Redis URL in production.
+
+The notification service uses a stable `CONSUMER_NAME` so it can resume that consumer's pending Redis Stream entries after a restart. Use a distinct stable name for each replica. `NOTIFICATION_CONCURRENCY` controls each worker's concurrent job count. `NOTIFICATION_QUEUE_NAME`, `STREAM_NAME`, and `CONSUMER_GROUP` can also be configured in `.env`.
 
 ## API
 
-Public endpoints use `/api`:
+Public routes are served under `/api`:
 
-| Method | Path | Auth | Purpose |
+| Method | Path | Access | Purpose |
 | --- | --- | --- | --- |
-| POST | `/auth/register` | Public | Register a customer |
-| POST | `/auth/login` | Public | Authenticate |
-| GET | `/products` | Public | List products |
-| GET | `/products/:id` | Public | Product details |
-| GET | `/products/search?q=` | Public | Search catalog |
-| POST | `/products` | Admin | Create a product |
-| PATCH | `/products/:id` | Admin | Update product details or inventory |
-| DELETE | `/products/:id` | Admin | Delete a product |
-| POST | `/cart` | Customer | Create/replace cart |
-| GET | `/cart` | Customer | Read cart |
-| POST | `/cart/items` | Customer | Add cart item |
-| DELETE | `/cart/items/:productId` | Customer | Remove cart item |
-| POST | `/orders` | Customer | Place order |
-| GET | `/orders` | Customer/Admin | Read orders |
-| GET | `/orders/:id` | Customer/Admin | Read one order |
-| POST | `/orders/:id/cancel` | Customer/Admin | Cancel eligible order |
-| GET | `/api/health` | Public | Gateway health |
+| `POST` | `/auth/register` | Public | Register a customer |
+| `POST` | `/auth/login` | Public | Authenticate |
+| `GET` | `/products` | Public | List products |
+| `GET` | `/products/:id` | Public | Get a product |
+| `GET` | `/products/search?q=` | Public | Search products |
+| `POST` | `/products` | Admin | Create a product |
+| `PATCH` | `/products/:id` | Admin | Update product details or stock |
+| `DELETE` | `/products/:id` | Admin | Delete a product |
+| `POST` | `/cart` | Customer | Replace the cart |
+| `GET` | `/cart` | Customer | Read the cart |
+| `POST` | `/cart/items` | Customer | Add cart items |
+| `DELETE` | `/cart/items/:productId` | Customer | Remove a cart item |
+| `POST` | `/orders` | Customer | Place an order |
+| `GET` | `/orders` | Customer or Admin | List orders |
+| `GET` | `/orders/:id` | Customer or Admin | Read an order |
+| `POST` | `/orders/:id/cancel` | Customer or Admin | Cancel an eligible order |
+| `GET` | `/health` | Public | Check gateway health |
 
-Internal health is exposed at `/health`; FastAPI services also expose OpenAPI docs at `/docs`. Protocol contracts are versioned in [`proto/`](./proto/).
+Internal services expose `/health`; FastAPI services also expose `/docs`. Service contracts are in [`proto/`](proto/).
 
-## Tests
+## Development checks
 
-Run focused tests from the repository root:
+Run Python tests from each service directory:
 
 ```powershell
-docker compose exec user-service pytest -q tests
-docker compose exec order-service pytest -q tests
-docker compose exec notification-service pytest -q tests
-cd gateway; npm test; npm run build
-cd ..\services\product-service; npm test; npm run build
-cd ..\payment-service; npm test; npm run build
-cd ..\..\frontend; npm run build
-cd ..\tests\e2e; npm install; npx playwright install chromium; npm test
+cd services/user-service; pytest tests
+cd ../order-service; pytest tests
 ```
 
-The API collection is [`tests/integration/orderflow.postman_collection.json`](./tests/integration/orderflow.postman_collection.json). The Playwright journey targets `PLAYWRIGHT_BASE_URL`. CI runs Python tests, Node tests/builds, builds all Docker images, and runs the browser journey against a fresh Compose stack.
+Run Node tests and TypeScript builds:
 
-## AWS EC2 deployment
+```powershell
+cd gateway; npm ci; npm test; npm run build
+cd ../services/product-service; npm ci; npm test; npm run build
+cd ../payment-service; npm ci; npm test; npm run build
+cd ../notification-service; npm ci; npm run check
+```
 
-For a cost-conscious deployment, run stateless service containers on a small EC2 instance and place PostgreSQL in RDS, Redis in ElastiCache, and MongoDB in Atlas. Install Docker Engine/Compose on EC2, configure the required environment values through a protected deployment environment (never bake secrets into images), publish images through GitHub Actions, and deploy with `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`. Restrict service/database ports to private networks and expose only TLS-terminated gateway/frontend traffic. Configure GitHub Actions repository secrets for registry and SSH deployment credentials. Verify `/health`, inspect `docker compose logs`, and use a rolling deployment strategy before increasing traffic.
+The browser journey is in [`tests/e2e/`](tests/e2e/). CI runs service checks, builds the Docker images, and runs the end-to-end journey against Compose.
 
-## Interview summary
+## Production deployment
 
-OrderFlow is a small, deployable e-commerce microservices system. It demonstrates service ownership boundaries, contract-based gRPC, a Redis Stream event consumer, cache-aside catalog reads, idempotent payments, and a saga that compensates inventory when payment fails. The key design constraint is avoiding distributed transactions: every service commits only its own state and communicates through explicit contracts.
-#   o r d e r F l o w  
- 
+See [`infrastructure/aws/README.md`](infrastructure/aws/README.md). The production overlay uses published GHCR images and requires explicit configuration for deployment credentials and data services. Keep secrets in a protected environment and restrict database and Redis access to the application network.
