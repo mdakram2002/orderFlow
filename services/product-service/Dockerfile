@@ -13,5 +13,6 @@ COPY services/product-service/package*.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY proto/product.proto ./proto/product.proto
+USER node
 EXPOSE 8002 50052
 CMD ["node", "dist/index.js"]

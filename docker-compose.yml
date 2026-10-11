@@ -48,9 +48,11 @@ services:
     build:
       context: .
       dockerfile: services/user-service/Dockerfile
-    env_file: .env
     environment:
       DATABASE_URL: ${USER_DATABASE_URL:-postgresql+psycopg://orderflow:orderflow_dev_only@postgres:5432/user_db}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXPIRES_SECONDS: ${JWT_EXPIRES_SECONDS:-3600}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
       PORT: 8001
       GRPC_PORT: 50051
     depends_on:
@@ -58,21 +60,22 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
-      interval: 10s
+      interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 12
+      start_period: 20s
 
   product-service:
     build:
       context: .
       dockerfile: services/product-service/Dockerfile
-    env_file: .env
     environment:
       PORT: 8002
       GRPC_PORT: 50052
       MONGODB_URI: mongodb://mongo:27017/orderflow
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      PRODUCT_CACHE_TTL_SECONDS: ${PRODUCT_CACHE_TTL_SECONDS:-300}
     depends_on:
       mongo:
         condition: service_healthy
@@ -80,103 +83,114 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8002/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
+      interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 12
+      start_period: 20s
 
   payment-service:
     build:
       context: .
       dockerfile: services/payment-service/Dockerfile
-    env_file: .env
     environment:
       PORT: 8004
       GRPC_PORT: 50054
       DATABASE_URL: ${PAYMENT_DATABASE_URL:-postgresql://orderflow:orderflow_dev_only@postgres:5432/payment_db}
+      PAYMENT_MODE: ${PAYMENT_MODE:-success}
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8004/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
+      interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 12
+      start_period: 20s
 
   notification-service:
     build:
       context: .
       dockerfile: services/notification-service/Dockerfile
-    env_file: .env
     environment:
       PORT: 8005
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      STREAM_NAME: ${STREAM_NAME:-order-events}
+      CONSUMER_GROUP: ${CONSUMER_GROUP:-notification-workers}
+      CONSUMER_NAME: ${CONSUMER_NAME:-notification-worker-1}
+      NOTIFICATION_QUEUE_NAME: ${NOTIFICATION_QUEUE_NAME:-order-notifications}
+      NOTIFICATION_CONCURRENCY: ${NOTIFICATION_CONCURRENCY:-10}
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
-      interval: 10s
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8005/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 12
+      start_period: 20s
 
   order-service:
     build:
       context: .
       dockerfile: services/order-service/Dockerfile
-    env_file: .env
     environment:
       PORT: 8003
       GRPC_PORT: 50053
       DATABASE_URL: ${ORDER_DATABASE_URL:-postgresql+psycopg://orderflow:orderflow_dev_only@postgres:5432/order_db}
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       USER_GRPC_TARGET: user-service:50051
       PRODUCT_GRPC_TARGET: product-service:50052
       PAYMENT_GRPC_TARGET: payment-service:50054
+      GRPC_TIMEOUT_SECONDS: ${GRPC_TIMEOUT_SECONDS:-2}
+      INVENTORY_RESERVATION_TTL_SECONDS: ${INVENTORY_RESERVATION_TTL_SECONDS:-900}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       user-service:
-        condition: service_started
+        condition: service_healthy
       product-service:
-        condition: service_started
+        condition: service_healthy
       payment-service:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
-      interval: 10s
+      interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 12
+      start_period: 20s
 
   gateway:
     build:
       context: .
       dockerfile: gateway/Dockerfile
-    env_file: .env
     environment:
       PORT: 3000
+      NODE_ENV: ${NODE_ENV:-development}
+      JWT_SECRET: ${JWT_SECRET:-}
       DOWNSTREAM_TIMEOUT_MS: 15000
       FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-http://localhost:3000,http://localhost:3001}
       USER_SERVICE_URL: http://user-service:8001
       PRODUCT_SERVICE_URL: http://product-service:8002
       ORDER_SERVICE_URL: http://order-service:8003
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     depends_on:
       redis:
         condition: service_healthy
       user-service:
-        condition: service_started
+        condition: service_healthy
       product-service:
-        condition: service_started
+        condition: service_healthy
       order-service:
-        condition: service_started
+        condition: service_healthy
     ports: ["127.0.0.1:${GATEWAY_HOST_PORT:-30000}:3000"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
+      interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 12
+      start_period: 15s
 
   frontend:
     build:
@@ -186,13 +200,16 @@ services:
         API_GATEWAY_URL: http://gateway:3000
     environment:
       API_GATEWAY_URL: http://gateway:3000
-    depends_on: [gateway]
+    depends_on:
+      gateway:
+        condition: service_healthy
     ports: ["127.0.0.1:${FRONTEND_HOST_PORT:-30001}:3000"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 15s
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 12
+      start_period: 15s
 
 volumes:
   postgres_data:

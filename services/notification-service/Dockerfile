@@ -1,9 +1,8 @@
-FROM python:3.12-slim
+FROM node:22-alpine
 WORKDIR /app
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-COPY services/notification-service/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY services/notification-service/ .
+COPY services/notification-service/package*.json ./
+RUN npm ci --omit=dev
+COPY services/notification-service/src ./src
+USER node
 EXPOSE 8005
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8005}"]
-
+CMD ["node", "src/index.js"]

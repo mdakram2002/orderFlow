@@ -12,8 +12,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY frontend/package*.json ./
 RUN npm ci --omit=dev
-COPY --from=build /app/.next ./.next
-COPY --from=build /app/public ./public
-COPY --from=build /app/next.config.js ./next.config.js
+COPY --chown=node:node --from=build /app/.next ./.next
+COPY --chown=node:node --from=build /app/public ./public
+COPY --chown=node:node --from=build /app/next.config.js ./next.config.js
+USER node
 EXPOSE 3000
 CMD ["npm", "start"]

@@ -14,5 +14,6 @@ RUN npm ci --omit=dev
 COPY services/payment-service/migrations ./migrations
 COPY --from=build /app/dist ./dist
 COPY proto/payment.proto ./proto/payment.proto
+USER node
 EXPOSE 8004 50054
 CMD ["sh", "-c", "npm run migrate && node dist/index.js"]

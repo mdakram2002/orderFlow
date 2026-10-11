@@ -1,35 +1,56 @@
 services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a production POSTGRES_PASSWORD}
+  mongo:
+    restart: unless-stopped
+  redis:
+    restart: unless-stopped
   gateway:
-    image: ghcr.io/${GHCR_OWNER}/orderflow-gateway:latest
+    image: ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/orderflow-gateway:latest
     pull_policy: always
     restart: unless-stopped
     environment:
       FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-https://orderflow.example.com}
       NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET:?Set a production JWT_SECRET}
+      REDIS_URL: ${REDIS_URL:?Set a secured production REDIS_URL}
   user-service:
-    image: ghcr.io/${GHCR_OWNER}/orderflow-user-service:latest
+    image: ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/orderflow-user-service:latest
     pull_policy: always
     restart: unless-stopped
+    environment:
+      DATABASE_URL: ${USER_DATABASE_URL:?Set USER_DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET:?Set a production JWT_SECRET}
   product-service:
-    image: ghcr.io/${GHCR_OWNER}/orderflow-product-service:latest
+    image: ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/orderflow-product-service:latest
     pull_policy: always
     restart: unless-stopped
     environment:
       SEED_DEMO_DATA: "false"
+      MONGODB_URI: ${MONGODB_URI:?Set a production MONGODB_URI}
+      REDIS_URL: ${REDIS_URL:?Set a secured production REDIS_URL}
   order-service:
-    image: ghcr.io/${GHCR_OWNER}/orderflow-order-service:latest
+    image: ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/orderflow-order-service:latest
     pull_policy: always
     restart: unless-stopped
+    environment:
+      DATABASE_URL: ${ORDER_DATABASE_URL:?Set ORDER_DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:?Set a secured production REDIS_URL}
   payment-service:
-    image: ghcr.io/${GHCR_OWNER}/orderflow-payment-service:latest
+    image: ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/orderflow-payment-service:latest
     pull_policy: always
     restart: unless-stopped
+    environment:
+      DATABASE_URL: ${PAYMENT_DATABASE_URL:?Set PAYMENT_DATABASE_URL}
   notification-service:
-    image: ghcr.io/${GHCR_OWNER}/orderflow-notification-service:latest
+    image: ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/orderflow-notification-service:latest
     pull_policy: always
     restart: unless-stopped
+    environment:
+      REDIS_URL: ${REDIS_URL:?Set a secured production REDIS_URL}
   frontend:
-    image: ghcr.io/${GHCR_OWNER}/orderflow-frontend:latest
+    image: ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/orderflow-frontend:latest
     pull_policy: always
     environment:
       API_GATEWAY_URL: http://gateway:3000

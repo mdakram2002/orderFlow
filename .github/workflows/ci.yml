@@ -5,12 +5,15 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   python:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [user-service, order-service, notification-service]
+        service: [user-service, order-service]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,8 +27,10 @@ jobs:
   node:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        service: [gateway, product-service, payment-service]
+        service: [gateway, product-service, payment-service, services/notification-service]
+    needs: python
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,14 +38,20 @@ jobs:
           node-version: "22"
       - run: npm ci
         working-directory: ${{ matrix.service }}
-      - run: npm test
+      - if: matrix.service != 'services/notification-service'
+        run: npm test
         working-directory: ${{ matrix.service }}
-      - run: npm run build
+      - if: matrix.service != 'services/notification-service'
+        run: npm run build
+        working-directory: ${{ matrix.service }}
+      - if: matrix.service == 'services/notification-service'
+        run: npm run check
         working-directory: ${{ matrix.service }}
 
   docker:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - service: gateway
@@ -67,6 +78,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+    needs: node
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -87,8 +99,11 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [python, node, docker]
+    needs: [python, node, docker, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Deploy to EC2 over SSH when deployment secrets are configured
         env:
@@ -113,6 +128,20 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    needs: docker
+    env:
+      NODE_ENV: development
+      JWT_SECRET: ci-orderflow-test-secret-with-more-than-32-characters
+      JWT_EXPIRES_SECONDS: "3600"
+      ADMIN_EMAILS: ""
+      POSTGRES_USER: orderflow
+      POSTGRES_PASSWORD: orderflow_ci_only
+      USER_DATABASE_URL: postgresql+psycopg://orderflow:orderflow_ci_only@postgres:5432/user_db
+      ORDER_DATABASE_URL: postgresql+psycopg://orderflow:orderflow_ci_only@postgres:5432/order_db
+      PAYMENT_DATABASE_URL: postgresql://orderflow:orderflow_ci_only@postgres:5432/payment_db
+      PAYMENT_MODE: success
+      SEED_DEMO_DATA: "true"
+      FRONTEND_ORIGINS: http://localhost:3000,http://localhost:3001
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -121,21 +150,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: cp .env.example .env
-      - run: docker compose up --build -d
-      - run: |
-          for attempt in $(seq 1 60); do
-            if curl --fail http://localhost:30000/health && curl --fail http://localhost:30001; then exit 0; fi
-            sleep 5
-          done
-          docker compose ps
-          docker compose logs --tail=100
-          exit 1
       - run: npm ci
         working-directory: tests/e2e
       - run: npx playwright install --with-deps chromium
         working-directory: tests/e2e
-      - run: npm test
+      - name: Build and wait for the complete stack
+        run: docker compose up --build --detach --wait --wait-timeout 300
+      - name: Confirm all services are healthy
+        run: docker compose ps
+      - name: Run Playwright end-to-end tests
+        env:
+          API_BASE_URL: http://localhost:30000/api
+          PLAYWRIGHT_BASE_URL: http://localhost:30001
+        run: npm test
         working-directory: tests/e2e
-      - if: always()
-        run: docker compose down -v
+      - name: Show Compose status and logs after failure
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color --tail=200
+      - name: Stop E2E stack and remove its data
+        if: always()
+        run: docker compose down --volumes --remove-orphans
