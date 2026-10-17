@@ -1,6 +1,43 @@
 # OrderFlow
 
-OrderFlow is a sample e-commerce application built as a set of independently runnable services. It demonstrates REST and gRPC APIs, a Redis-backed cart and cache, an order saga, and asynchronous order notifications.
+OrderFlow is a microservices-based e-commerce application that demonstrates how an online shopping platform can manage users, products, carts, orders, and payments through independent backend services.
+
+Instead of handling everything inside one large application, OrderFlow separates business responsibilities into individual services that communicate through REST, gRPC, and asynchronous events. This makes the repository a practical example of coordinating a multi-step order workflow, handling service failures, and processing background tasks without coupling every operation to one application process.
+
+OrderFlow is an engineering demonstration, not a production e-commerce business serving customers. Payments use a local mock provider, and the notification worker logs a mock message; the repository does not currently process real charges or send live notifications.
+
+## What real-world problem does it demonstrate?
+
+When a customer places an order, an e-commerce backend must coordinate the order, inventory, and payment. Those operations live in separate systems and can fail or respond slowly. OrderFlow models the engineering challenges involved:
+
+- **Order and payment coordination:** an order follows explicit states while payment is processing, succeeds, fails, or has an uncertain outcome.
+- **Service independence:** authentication, products, orders, payments, and notifications have separate responsibilities and data stores.
+- **Slow background work:** order events move through a queue so notification work does not block the customer request.
+- **Repeated requests:** per-order payment idempotency and client order idempotency help prevent duplicate side effects when requests are retried.
+- **Performance:** Redis supports cart storage, product caching, and the event pipeline.
+- **Operational reliability:** Docker Compose, health checks, automated service checks, and an end-to-end browser journey help developers run and verify the system.
+
+These are architectural demonstrations based on the current codebase; they should not be read as claims that OrderFlow is a complete production commerce platform.
+
+## Main features
+
+- Customer registration and login, product browsing and search, product details, cart management, order placement, order history, order details, and eligible order cancellation.
+- Independent user, product, order, payment, and notification services behind an API Gateway.
+- A saga-style order lifecycle with inventory reservation and compensating release.
+- A transactional outbox, Redis Streams, and BullMQ background notification pipeline with retry handling.
+- JWT authentication, role checks, input validation, rate limits, and request correlation IDs.
+- Docker Compose setup, health endpoints, GitHub Actions service checks, and an end-to-end browser journey.
+
+## Customer journey
+
+1. Create an account or sign in.
+2. Browse the catalog, search products, and add items to the cart.
+3. Place an order. The backend coordinates inventory and mock payment processing across services.
+4. View the order status and details from order history while the backend processes events asynchronously.
+
+The storefront is designed to make that journey straightforward while the backend handles service-to-service coordination.
+
+For step-by-step environment setup and troubleshooting, see [SETUP.md](SETUP.md).
 
 ## Architecture
 
@@ -143,7 +180,7 @@ cd ../payment-service; npm ci; npm test; npm run build
 cd ../notification-service; npm ci; npm run check
 ```
 
-The browser journey is in [`tests/e2e/`](tests/e2e/). CI runs service checks, builds the Docker images, and runs the end-to-end journey against Compose.
+The browser journey is in [`tests/e2e/`](tests/e2e/). CI runs service checks and builds the full Docker Compose stack before running the end-to-end journey.
 
 ## Production deployment
 
