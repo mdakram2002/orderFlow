@@ -18,6 +18,40 @@ Browser -> Next.js frontend -> API Gateway -> User, Product, Order, Payment serv
 
 Order status events are committed to the order service's database outbox. The outbox publisher sends them to the `order-events` Redis Stream. The notification service enqueues them into BullMQ's `order-notifications` queue and acknowledges the stream event after the queue accepts it. BullMQ retries failed jobs with exponential backoff. The current notification handler logs a mock email; it does not send email or push browser notifications.
 
+### Order and payment flow
+
+The gateway authenticates the customer and requires an `Idempotency-Key` header on order creation. The order service scopes the key to the authenticated user, stores a fingerprint of the item list, and returns the existing order for a retry with the same key and payload. Reusing a key with different items returns `409 Conflict`. The service validates the active user and product details, persists a `PENDING` order, reserves each product through an atomic MongoDB update, and calls the payment service over gRPC with the stable payment idempotency key `payment:<order-id>`. A successful mock payment confirms the order. A definite payment failure releases reservations and cancels the order.
+
+If the payment RPC fails after processing starts, its outcome may be uncertain: the payment service could have committed the result while the response was lost. In that case the order moves to `PAYMENT_OUTCOME_UNKNOWN`, returns HTTP 503, and keeps inventory reserved. A background reconciliation loop retries the idempotent payment request. It confirms the order on `SUCCESS`; it releases inventory and cancels only after a definitive `FAILED` result. This tolerates duplicate payment requests, but the payment provider is still a local mock and there is no real-provider webhook or reconciliation API.
+
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant G as Gateway
+    participant O as Order service
+    participant I as Product service
+    participant P as Payment service
+    C->>G: POST /api/orders
+    G->>O: Authenticated order request
+    O->>I: Reserve inventory (per item)
+    O->>P: ProcessPayment (payment:<order-id>)
+    alt Payment succeeds
+        P-->>O: SUCCESS
+        O->>O: Confirm order and write outbox event
+        O-->>G: CONFIRMED
+    else Payment fails definitively
+        P-->>O: FAILED
+        O->>I: Release reserved inventory
+        O->>O: Cancel order and write outbox event
+    else RPC result is uncertain
+        O->>O: Mark PAYMENT_OUTCOME_UNKNOWN
+        Note over O,I: Keep inventory reserved
+        O->>P: Reconcile with same idempotency key
+    end
+```
+
+The outbox publisher is at-least-once: a crash after Redis accepts an event but before `published_at` commits can publish it again. Stream-to-BullMQ handoff uses the event key as the BullMQ job ID and acknowledges the stream only after queue insertion. Consumers must tolerate duplicates; this is not exactly-once delivery. Notification processing is currently a mock log handler, with no persistent in-app notifications, email provider, or Socket.IO channel.
+
 ## Services
 
 | Service | Runtime | Responsibility |
@@ -86,6 +120,8 @@ Public routes are served under `/api`:
 | `GET` | `/orders/:id` | Customer or Admin | Read an order |
 | `POST` | `/orders/:id/cancel` | Customer or Admin | Cancel an eligible order |
 | `GET` | `/health` | Public | Check gateway health |
+
+`POST /api/orders` requires `Idempotency-Key` (1–128 letters, digits, `.`, `_`, `:`, or `-`). Keep the same key when retrying the same order request.
 
 Internal services expose `/health`; FastAPI services also expose `/docs`. Service contracts are in [`proto/`](proto/).
 

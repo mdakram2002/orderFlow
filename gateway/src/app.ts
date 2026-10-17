@@ -175,12 +175,19 @@ app.delete("/api/cart/items/:productId", authenticate, (req, res) =>
   }));
 
 app.post("/api/orders", authenticate, async (req, res) => {
+  const idempotencyKey = req.header("idempotency-key");
+  if (!idempotencyKey || !/^[A-Za-z0-9._:-]{1,128}$/.test(idempotencyKey)) {
+    return res.status(400).json(errorResponse(
+      "INVALID_ARGUMENT", "A valid Idempotency-Key header is required", req.requestId,
+    ));
+  }
   const parsed = orderSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(errorResponse("INVALID_ARGUMENT", "At least one valid order item is required", req.requestId));
   return forward(req as AuthenticatedRequest, res, config.orderServiceUrl, "/internal/orders", {
     method: "POST",
     body: { items: parsed.data.items.map((item) => ({ product_id: item.productId, quantity: item.quantity })) },
     authenticated: true,
+    idempotencyKey,
   });
 });
 app.get("/api/orders", authenticate, (req, res) =>

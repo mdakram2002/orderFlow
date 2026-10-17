@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
@@ -10,6 +11,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
@@ -98,12 +100,51 @@ async def publish_outbox() -> None:
         await asyncio.sleep(1)
 
 
+async def reconcile_payment_outcomes() -> None:
+    """Resolve interrupted payment calls using the payment service's stable order key."""
+    while True:
+        try:
+            with SessionLocal() as db:
+                orders = db.scalars(
+                    select(Order).options(selectinload(Order.items)).where(
+                        Order.status.in_(["PAYMENT_PROCESSING", "PAYMENT_OUTCOME_UNKNOWN"])
+                    ).order_by(Order.created_at).limit(50)
+                ).unique().all()
+                for order in orders:
+                    try:
+                        payment = await process_payment(
+                            order.id, order.user_id, order.total_minor, order.currency, "reconciliation"
+                        )
+                        if payment.status == "SUCCESS":
+                            save_status(db, order, "CONFIRMED", "ORDER_CONFIRMED")
+                            continue
+                        if payment.status != "FAILED":
+                            continue
+                        # Release only after the payment service has authoritatively
+                        # returned FAILED. Releases are idempotent, so retries are safe.
+                        released_all = True
+                        for item in order.items:
+                            result = await release_inventory(order.id, item.product_id, item.quantity)
+                            if not result.released:
+                                released_all = False
+                                break
+                        if released_all:
+                            save_status(db, order, "PAYMENT_FAILED", "PAYMENT_FAILED")
+                            save_status(db, order, "CANCELLED", "ORDER_CANCELLED")
+                    except Exception:
+                        logger.exception("Payment reconciliation deferred for order %s", order.id)
+        except Exception:
+            logger.exception("Payment reconciliation scan failed")
+        await asyncio.sleep(5)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     publisher_task = asyncio.create_task(publish_outbox())
     grpc_task = asyncio.create_task(serve_grpc())
+    reconciliation_task = asyncio.create_task(reconcile_payment_outcomes())
     yield
-    for task in (publisher_task, grpc_task):
+    for task in (publisher_task, grpc_task, reconciliation_task):
         task.cancel()
         try:
             await task
@@ -186,12 +227,31 @@ async def create_order(
     payload: OrderInput,
     request: Request,
     x_user_id: str = Header(...),
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
     db: Session = Depends(get_db),
 ):
+    if not idempotency_key or len(idempotency_key) > 128 or any(
+        character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
+        for character in idempotency_key
+    ):
+        raise HTTPException(status_code=400, detail="A valid Idempotency-Key is required")
+    request_items = sorted(
+        ((item.product_id, item.quantity) for item in payload.items), key=lambda item: item[0]
+    )
+    request_hash = hashlib.sha256(json.dumps(request_items, separators=(",", ":")).encode()).hexdigest()
     try:
         user_valid = await validate_user(x_user_id)
         if not user_valid.valid:
             raise HTTPException(status_code=401, detail="User is not active")
+        previous = db.scalar(
+            select(Order).options(selectinload(Order.items)).where(
+                Order.user_id == x_user_id, Order.idempotency_key == idempotency_key
+            )
+        )
+        if previous:
+            if previous.request_hash != request_hash:
+                raise HTTPException(status_code=409, detail="Idempotency-Key was already used for a different order")
+            return serialize_order(previous)
         customer = await get_user(x_user_id)
         products = []
         for item in payload.items:
@@ -218,6 +278,8 @@ async def create_order(
         status="PENDING",
         total_minor=sum(product.price_minor * item.quantity for item, product in products),
         currency=next(iter(currencies)),
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
         items=[
             OrderItem(
                 product_id=product.product_id,
@@ -230,13 +292,27 @@ async def create_order(
         history=[OrderStatusHistory(status="PENDING")],
     )
     db.add(order)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as error:
+        db.rollback()
+        previous = db.scalar(
+            select(Order).options(selectinload(Order.items)).where(
+                Order.user_id == x_user_id, Order.idempotency_key == idempotency_key
+            )
+        )
+        if previous and previous.request_hash == request_hash:
+            return serialize_order(previous)
+        if previous:
+            raise HTTPException(status_code=409, detail="Idempotency-Key was already used for a different order") from error
+        raise
     db.add(OrderOutbox(
         id=str(uuid.uuid4()), event_type="ORDER_CREATED", order_id=order_id,
         user_id=x_user_id, email=customer.email,
     ))
     db.commit()
     reserved: list[tuple[str, int]] = []
+    payment_started = False
     try:
         for item, _ in products:
             response = await reserve_inventory(order_id, item.product_id, item.quantity)
@@ -244,7 +320,8 @@ async def create_order(
                 raise RuntimeError(f"Inventory reservation rejected: {response.reason}")
             reserved.append((item.product_id, item.quantity))
         save_status(db, order, "INVENTORY_RESERVED")
-        save_status(db, order, "PAYMENT_PROCESSING")
+        save_status(db, order, "PAYMENT_PROCESSING", "PAYMENT_PROCESSING", customer.email)
+        payment_started = True
         payment = await process_payment(
             order_id, x_user_id, order.total_minor, order.currency, request.state.request_id
         )
@@ -255,6 +332,21 @@ async def create_order(
         await redis.delete(f"cart:{x_user_id}")
         return serialize_order(order)
     except Exception as error:
+        if payment_started and order.status == "PAYMENT_PROCESSING":
+            # A failed RPC can mean the payment committed but its response was lost.
+            # Keep stock reserved until an idempotent status retry resolves the result.
+            save_status(db, order, "PAYMENT_OUTCOME_UNKNOWN", "PAYMENT_OUTCOME_UNKNOWN", customer.email)
+            logger.error(json.dumps({
+                "service": "order-service",
+                "level": "WARNING",
+                "requestId": request.state.request_id,
+                "message": "Payment outcome is uncertain; inventory remains reserved for reconciliation",
+                "orderId": order_id,
+            }))
+            raise HTTPException(
+                status_code=503,
+                detail="Payment status is being checked; do not retry payment with a new order",
+            ) from error
         compensation_failed = False
         for product_id, quantity in reversed(reserved):
             try:
@@ -265,7 +357,8 @@ async def create_order(
                 compensation_failed = True
                 logger.exception("Inventory compensation failed for order %s product %s", order_id, product_id)
         if compensation_failed:
-            save_status(db, order, "PAYMENT_FAILED", "PAYMENT_FAILED", customer.email)
+            if order.status != "PAYMENT_FAILED":
+                save_status(db, order, "PAYMENT_FAILED", "PAYMENT_FAILED", customer.email)
         else:
             save_status(db, order, "CANCELLED", "ORDER_CANCELLED", customer.email)
         logger.error(json.dumps({

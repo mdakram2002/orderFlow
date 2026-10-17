@@ -18,3 +18,10 @@ def test_failed_payment_can_be_compensated_and_terminal_state_cannot_change():
     assert not can_transition("CONFIRMED", "CANCELLED")
     assert not can_transition("CANCELLED", "CONFIRMED")
 
+
+def test_uncertain_payment_keeps_order_open_until_authoritative_result():
+    assert can_transition("PAYMENT_PROCESSING", "PAYMENT_OUTCOME_UNKNOWN")
+    assert can_transition("PAYMENT_OUTCOME_UNKNOWN", "CONFIRMED")
+    assert can_transition("PAYMENT_OUTCOME_UNKNOWN", "PAYMENT_FAILED")
+    assert not can_transition("PAYMENT_OUTCOME_UNKNOWN", "CANCELLED")
+

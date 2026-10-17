@@ -8,7 +8,7 @@ export async function forward(
   res: Response,
   baseUrl: string,
   path: string,
-  options: { method?: string; body?: unknown; authenticated?: boolean } = {},
+  options: { method?: string; body?: unknown; authenticated?: boolean; idempotencyKey?: string } = {},
 ): Promise<void> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.downstreamTimeoutMs);
@@ -21,6 +21,7 @@ export async function forward(
       headers["x-user-id"] = req.user.id;
       headers["x-user-role"] = req.user.role;
     }
+    if (options.idempotencyKey) headers["idempotency-key"] = options.idempotencyKey;
     const response = await fetch(`${baseUrl}${path}`, {
       method: options.method ?? "GET",
       headers,
